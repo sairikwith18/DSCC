@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed System Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; }
+        h1 { text-align: center; color: #333; }
+        .grid { display: flex; gap: 20px; justify-content: center; margin-bottom: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); width: 220px; text-align: center; }
+        .card h3 { margin: 0 0 10px 0; color: #555; }
+        .healthy { color: #28a745; font-weight: bold; }
+        .down { color: #dc3545; font-weight: bold; }
+        .load { color: #007bff; font-weight: bold; font-size: 1.2em; display: block; margin-top: 10px; }
+        .chart-container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); max-width: 800px; margin: 0 auto; }
+    </style>
+</head>
+<body>
+    <h1>System Monitoring Dashboard</h1>
+    <div class="grid" id="server-status"><div class="card"><h3>Waiting for data...</h3></div></div>
+    <div class="chart-container"><canvas id="latencyChart"></canvas></div>
+
+    <script>
+        const ctx = document.getElementById('latencyChart').getContext('2d');
+        const latencyChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [], 
+                datasets: [
+                    { label: 'S1 Latency (ms)', borderColor: '#007bff', data: [], fill: false },
+                    { label: 'S2 Latency (ms)', borderColor: '#28a745', data: [], fill: false },
+                    { label: 'S3 Latency (ms)', borderColor: '#ffc107', data: [], fill: false }
+                ]
+            },
+            options: { animation: false, scales: { x: { display: false }, y: { beginAtZero: true } } }
+        });
+
+        async function fetchAndUpdateData() {
+            try {
+                const response = await fetch('/api/live-data');
+                const result = await response.json();
+                if (result.error) return;
+
+                const servers = { "S1": { rtt: 0, fails: 0, load: 0 }, "S2": { rtt: 0, fails: 0, load: 0 }, "S3": { rtt: 0, fails: 0, load: 0 } };
+                
+                result.data.forEach(entry => {
+                    const t = entry.target;
+                    servers[t].rtt = entry.rtt_ms !== -1 ? entry.rtt_ms : servers[t].rtt;
+                    servers[t].fails += entry.failure_count;
+                    servers[t].load = entry.load || 0;
+                });
+
+                const timeLabel = new Date().toLocaleTimeString();
+                latencyChart.data.labels.push(timeLabel);
+                latencyChart.data.datasets[0].data.push(servers["S1"].rtt);
+                latencyChart.data.datasets[1].data.push(servers["S2"].rtt);
+                latencyChart.data.datasets[2].data.push(servers["S3"].rtt);
+
+                if (latencyChart.data.labels.length > 15) {
+                    latencyChart.data.labels.shift();
+                    latencyChart.data.datasets.forEach(d => d.data.shift());
+                }
+
+                const statusDiv = document.getElementById('server-status');
+                statusDiv.innerHTML = ''; 
+                
+                for (const [name, stats] of Object.entries(servers)) {
+                    const isHealthy = stats.fails < 3;
+                    const statusText = isHealthy ? `<span class="healthy">Healthy (${stats.rtt}ms)</span>` : `<span class="down">BLACKLISTED (${stats.fails} fails)</span>`;
+                    statusDiv.innerHTML += `
+                        <div class="card">
+                            <h3>${name}</h3>
+                            <p>${statusText}</p>
+                            <span class="load">Active Load: ${stats.load}</span>
+                        </div>`;
+                }
+                latencyChart.update();
+            } catch (error) {}
+        }
+        setInterval(fetchAndUpdateData, 2000); fetchAndUpdateData();
+    </script>
+</body>
+</html>
